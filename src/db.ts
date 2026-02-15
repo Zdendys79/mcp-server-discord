@@ -9,7 +9,7 @@ export function getPool(): mysql.Pool {
       host: process.env.DB_HOST || "127.0.0.1",
       port: parseInt(process.env.DB_PORT || "3306"),
       user: process.env.DB_USER || "claude",
-      password: process.env.DB_PASS || "",
+      password: process.env.DB_PASS || process.env.DB_PASSWORD || "",
       database: process.env.DB_NAME || "discord_dh",
       connectionLimit: 10,
       waitForConnections: true,

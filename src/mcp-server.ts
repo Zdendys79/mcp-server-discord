@@ -186,6 +186,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "discord_fetch_messages",
+      description:
+        "Fetch messages directly from Discord REST API (not from DB cache). Use this to read historical messages from any channel the bot can access. Returns messages in chronological order.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          channel_id: {
+            type: "string",
+            description: "Discord channel ID to fetch from",
+          },
+          limit: {
+            type: "number",
+            description:
+              "Number of messages to fetch (default: 100, max: 500). Fetches in batches of 100.",
+          },
+          before: {
+            type: "string",
+            description:
+              "Fetch messages before this message ID (for pagination)",
+          },
+          after: {
+            type: "string",
+            description:
+              "Fetch messages after this message ID (for newer messages)",
+          },
+        },
+        required: ["channel_id"],
+      },
+    },
+    {
       name: "discord_bot_status",
       description:
         "Get bot status: total messages logged, monitored channels, database stats.",
@@ -346,6 +376,93 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 {
                   success: true,
                   message: `Channel #${channelName} (${channelId}) added to monitoring.`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case "discord_fetch_messages": {
+        if (!discordRest) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Error: DISCORD_BOT_TOKEN not set, cannot query Discord API.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const channelId = args?.channel_id as string;
+        const maxMessages = Math.min((args?.limit as number) || 100, 500);
+        const beforeId = args?.before as string | undefined;
+        const afterId = args?.after as string | undefined;
+
+        interface DiscordMessage {
+          id: string;
+          author: { username: string; global_name?: string | null; id: string };
+          content: string;
+          timestamp: string;
+          attachments?: Array<{ url: string; filename: string }>;
+          referenced_message?: { id: string } | null;
+        }
+
+        const allMessages: DiscordMessage[] = [];
+        let cursor = beforeId;
+        const batchSize = 100;
+
+        while (allMessages.length < maxMessages) {
+          const query: Record<string, string | number> = {
+            limit: Math.min(batchSize, maxMessages - allMessages.length),
+          };
+          if (afterId && allMessages.length === 0) {
+            query.after = afterId;
+          } else if (cursor) {
+            query.before = cursor;
+          }
+
+          const batch = (await discordRest.get(
+            Routes.channelMessages(channelId),
+            { query }
+          )) as DiscordMessage[];
+
+          if (batch.length === 0) break;
+          allMessages.push(...batch);
+          cursor = batch[batch.length - 1].id;
+
+          if (batch.length < batchSize) break;
+        }
+
+        // Reverse to chronological order (Discord returns newest first)
+        allMessages.reverse();
+
+        const formatted = allMessages.map((m) => ({
+          id: m.id,
+          date: m.timestamp.substring(0, 10),
+          time: m.timestamp.substring(11, 16),
+          author: m.author.global_name || m.author.username,
+          author_id: m.author.id,
+          content: m.content || "[no text]",
+          attachments: m.attachments?.length
+            ? m.attachments.map((a) => a.filename)
+            : undefined,
+          reply_to: m.referenced_message?.id || undefined,
+        }));
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  channel_id: channelId,
+                  count: formatted.length,
+                  messages: formatted,
                 },
                 null,
                 2

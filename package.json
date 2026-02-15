@@ -1,0 +1,31 @@
+{
+  "name": "mcp-server-discord",
+  "version": "2026-02-15-20-39-45",
+  "description": "MCP server for Discord integration - D&D session monitoring and communication",
+  "type": "module",
+  "main": "dist/mcp-server.js",
+  "scripts": {
+    "prebuild": "bash scripts/update-version.sh 2>/dev/null || true",
+    "build": "tsc",
+    "start:bot": "node dist/bot.js",
+    "start:mcp": "node dist/mcp-server.js",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "mcp",
+    "discord",
+    "dnd",
+    "draci-hlidka"
+  ],
+  "author": "Zdendys79",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.19.1",
+    "discord.js": "^14.18.0",
+    "mysql2": "^3.15.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "typescript": "^5.9.3"
+  }
+}

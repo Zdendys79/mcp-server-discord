@@ -417,18 +417,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const batchSize = 100;
 
         while (allMessages.length < maxMessages) {
-          const query: Record<string, string | number> = {
-            limit: Math.min(batchSize, maxMessages - allMessages.length),
-          };
+          const params = new URLSearchParams();
+          params.set(
+            "limit",
+            String(Math.min(batchSize, maxMessages - allMessages.length))
+          );
           if (afterId && allMessages.length === 0) {
-            query.after = afterId;
+            params.set("after", afterId);
           } else if (cursor) {
-            query.before = cursor;
+            params.set("before", cursor);
           }
 
           const batch = (await discordRest.get(
             Routes.channelMessages(channelId),
-            { query }
+            { query: params }
           )) as DiscordMessage[];
 
           if (batch.length === 0) break;

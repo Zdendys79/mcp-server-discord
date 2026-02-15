@@ -162,6 +162,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "discord_list_guilds",
+      description:
+        "List all Discord servers (guilds) the bot is a member of. Use this to discover guild IDs before listing channels.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "discord_list_guild_channels",
+      description:
+        "List all text channels in a Discord guild. Use this to discover channel IDs before adding them to monitoring.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          guild_id: {
+            type: "string",
+            description: "Discord guild (server) ID",
+          },
+        },
+        required: ["guild_id"],
+      },
+    },
+    {
       name: "discord_bot_status",
       description:
         "Get bot status: total messages logged, monitored channels, database stats.",
@@ -322,6 +346,116 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 {
                   success: true,
                   message: `Channel #${channelName} (${channelId}) added to monitoring.`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case "discord_list_guilds": {
+        if (!discordRest) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Error: DISCORD_BOT_TOKEN not set, cannot query Discord API.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const guilds = (await discordRest.get(Routes.userGuilds())) as Array<{
+          id: string;
+          name: string;
+          icon: string | null;
+          owner: boolean;
+        }>;
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                guilds.map((g) => ({
+                  id: g.id,
+                  name: g.name,
+                  owner: g.owner,
+                })),
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case "discord_list_guild_channels": {
+        if (!discordRest) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Error: DISCORD_BOT_TOKEN not set, cannot query Discord API.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const guildId = args?.guild_id as string;
+        const allChannels = (await discordRest.get(
+          Routes.guildChannels(guildId)
+        )) as Array<{
+          id: string;
+          name: string;
+          type: number;
+          parent_id: string | null;
+          position: number;
+        }>;
+
+        // Channel type names
+        const typeNames: Record<number, string> = {
+          0: "text",
+          2: "voice",
+          4: "category",
+          5: "announcement",
+          13: "stage",
+          15: "forum",
+          16: "media",
+        };
+
+        // Build category name lookup
+        const categories = new Map<string, string>();
+        for (const ch of allChannels) {
+          if (ch.type === 4) {
+            categories.set(ch.id, ch.name);
+          }
+        }
+
+        // Return text channels sorted by position, with category info
+        const textChannels = allChannels
+          .filter((ch) => ch.type === 0)
+          .sort((a, b) => a.position - b.position)
+          .map((ch) => ({
+            id: ch.id,
+            name: ch.name,
+            category: ch.parent_id ? categories.get(ch.parent_id) || null : null,
+          }));
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  guild_id: guildId,
+                  total_channels: allChannels.length,
+                  text_channels: textChannels.length,
+                  channels: textChannels,
                 },
                 null,
                 2

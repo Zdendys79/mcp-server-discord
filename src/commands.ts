@@ -119,7 +119,7 @@ export async function handleAnketa(message: Message): Promise<void> {
 
   // Build poll message
   const displayName = message.member?.displayName || message.author.username;
-  let pollText = `**${question}**\n_(anketa od ${displayName})_\n\n`;
+  let pollText = `Anketa pro @everyone: **${question}**\n_(anketa od ${displayName})_\n\n`;
 
   for (let i = 0; i < options.length; i++) {
     pollText += `${REGIONAL_INDICATORS[i]}  ${options[i]}\n`;

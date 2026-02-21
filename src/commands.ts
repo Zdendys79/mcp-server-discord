@@ -1,5 +1,5 @@
 // Command handlers for /anketa and /prepis
-import { Message, Client, TextChannel } from "discord.js";
+import { Message, Client, TextChannel, ChannelType, DMChannel } from "discord.js";
 import { joinAndRecord, getVoiceStatus } from "./voice.js";
 import { insertBotkaMessage } from "./db.js";
 import { getPool } from "./db.js";
@@ -11,6 +11,32 @@ const REGIONAL_INDICATORS = [
   "\u{1F1F0}", "\u{1F1F1}", "\u{1F1F2}", "\u{1F1F3}", "\u{1F1F4}",
   "\u{1F1F5}", "\u{1F1F6}", "\u{1F1F7}", "\u{1F1F8}", "\u{1F1F9}",
 ];
+
+/**
+ * Detect suspicious words in poll text (common Czech typos).
+ * Returns array of warnings for detected issues.
+ */
+function detectSuspiciousWords(text: string): string[] {
+  const suspicious: string[] = [];
+  const words = text.toLowerCase().split(/\s+/);
+
+  // Common Czech typos
+  const patterns = [
+    { pattern: /zů[^v]/, correction: "zú", example: "zůčastnit → zúčastnit" },
+    { pattern: /výšastn/, correction: "účastn", example: "výšastnit → zúčastnit" },
+    { pattern: /přijt/, correction: "přijít/přijdu", example: "přijt → přijít" },
+  ];
+
+  words.forEach(word => {
+    patterns.forEach(p => {
+      if (p.pattern.test(word)) {
+        suspicious.push(`"${word}" (možná ${p.correction}? ${p.example})`);
+      }
+    });
+  });
+
+  return suspicious;
+}
 
 /**
  * Handle /anketa command - create poll with emoji reactions.
@@ -44,8 +70,52 @@ export async function handleAnketa(message: Message): Promise<void> {
     return;
   }
 
-  const question = parts[0];
-  const options = parts.slice(1);
+  // Check for suspicious words
+  const suspicious = detectSuspiciousWords(anketaText);
+
+  let finalText = anketaText;
+
+  if (suspicious.length > 0) {
+    // Send PM to author with detected issues
+    try {
+      const warningMsg = await message.author.send(
+        `Detekovala jsem možné překlepy v tvé anketě:\n\n` +
+        suspicious.map(s => `• ${s}`).join("\n") +
+        `\n\nPokud chceš anketu opravit, odpověz na tuto zprávu s opravou do **10 minut**.\n` +
+        `Format: Opravená otázka | Možnost A | Možnost B | ...\n\n` +
+        `Pokud neodpovíš, použiji původní verzi.`
+      );
+
+      // Wait for DM reply (10 min timeout)
+      const filter = (m: Message) => m.author.id === message.author.id && m.channel.type === ChannelType.DM;
+
+      try {
+        const collected = await (warningMsg.channel as DMChannel).awaitMessages({
+          filter,
+          max: 1,
+          time: 10 * 60 * 1000, // 10 minutes
+          errors: ["time"]
+        });
+
+        const reply = collected.first();
+        if (reply && reply.content.trim().length > 0) {
+          finalText = reply.content.trim();
+          await message.author.send(`✓ Použiji opravenou verzi.`);
+        }
+      } catch (timeoutErr) {
+        // Timeout - use original
+        await message.author.send(`Časový limit vypršel. Použiji původní verzi.`);
+      }
+    } catch (dmErr) {
+      console.error(`[ANKETA] Failed to send DM to ${message.author.tag}:`, dmErr);
+      // Continue with original text if DM fails
+    }
+  }
+
+  // Parse final text
+  const finalParts = finalText.split("|").map((p) => p.trim()).filter((p) => p.length > 0);
+  const question = finalParts[0];
+  const options = finalParts.slice(1);
 
   // Build poll message
   const displayName = message.member?.displayName || message.author.username;

@@ -231,21 +231,12 @@ client.on(Events.MessageCreate, async (message) => {
         const channelName =
           "name" in message.channel ? message.channel.name : "unknown";
 
-        // Insert query to get ID for reply tracking
-        const queryId = await insertBotQuery({
-          channel_id: message.channel.id,
-          message_id: message.id,
-          author_id: message.author.id,
-          author_name: displayName,
-          query_text: queryText,
-        });
-
-        // Relay to claude via botka_messages (includes query_id for reply)
+        // Relay to claude via botka_messages (reply via discord_outgoing)
         await insertBotkaMessage({
           source: "channel",
           author_id: message.author.id,
           author_name: displayName,
-          content: `[#${channelName}] ${queryText} (query_id=${queryId})`,
+          content: `[#${channelName}] ${queryText} (channel_id=${message.channel.id})`,
         });
 
         // Show typing indicator
@@ -253,55 +244,8 @@ client.on(Events.MessageCreate, async (message) => {
           await message.channel.sendTyping();
         }
 
-        // Poll for response (no hard timeout - response is mandatory)
-        const pollStart = Date.now();
-        let patienceMsg: Awaited<ReturnType<typeof message.channel.send>> | null = null;
-        const pollInterval = setInterval(async () => {
-          try {
-            // After 20s, send patience message (once)
-            if (!patienceMsg && Date.now() - pollStart > 20000) {
-              patienceMsg = await message.channel.send(
-                "Můj LLM model je zaneprázdněn. Moje odpověď bude trvat o něco déle. Mějte prosím strpení."
-              );
-            }
-
-            const status = await getBotQueryStatus(queryId);
-            if (status === "answered") {
-              clearInterval(pollInterval);
-              // Delete patience message if it was sent
-              if (patienceMsg) {
-                await patienceMsg.delete().catch(() => {});
-              }
-              const response = await getBotQueryResponse(queryId);
-              if (response) {
-                const text = response.response_text as string;
-                // Split long messages (Discord 2000 char limit)
-                if (text.length <= 2000) {
-                  await message.channel.send(text);
-                } else {
-                  const chunks: string[] = [];
-                  for (let i = 0; i < text.length; i += 1990) {
-                    chunks.push(text.substring(i, i + 1990));
-                  }
-                  for (const chunk of chunks) {
-                    await message.channel.send(chunk);
-                  }
-                }
-              }
-            } else if (status === "error") {
-              clearInterval(pollInterval);
-              await message.channel.send("Omlouvám se, došlo k chybě při zpracování dotazu.");
-            }
-          } catch (err) {
-            console.error(
-              "[BOT] Query poll error:",
-              err instanceof Error ? err.message : err
-            );
-          }
-        }, 2000);
-
         console.log(
-          `[BOT] Channel query from ${displayName} in #${channelName} relayed to claude`
+          `[BOT] Channel query from ${displayName} in #${channelName} relayed to claude (via discord_outgoing)`
         );
       }
       return; // Don't log /botka commands as regular messages

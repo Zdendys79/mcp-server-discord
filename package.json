@@ -1,6 +1,6 @@
 {
   "name": "mcp-server-discord",
-  "version": "3455188",
+  "version": "872d822",
   "description": "MCP server for Discord integration - D&D session monitoring and communication",
   "type": "module",
   "main": "dist/mcp-server.js",

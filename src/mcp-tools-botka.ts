@@ -9,7 +9,7 @@ const botkaReplyHandler = async (args: Record<string, unknown>) => {
   const authorId = (args.author_id as string) || null;
   const authorName = (args.author_name as string) || null;
   const content = args.content as string;
-  const queryId = args.query_id as number | undefined;
+  const channelId = args.channel_id as string | undefined;
 
   if (!content) {
     return errorResponse("content is required");
@@ -17,22 +17,18 @@ const botkaReplyHandler = async (args: Record<string, unknown>) => {
 
   const db = getPool();
 
-  if (queryId) {
-    // Channel query reply
+  if (channelId) {
+    // Channel reply - send via discord_outgoing
     await db.execute(
-      `INSERT INTO bot_query_responses (query_id, response_text, model)
-       VALUES (?, ?, 'claude')`,
-      [queryId, content]
-    );
-    await db.execute(
-      `UPDATE bot_queries SET status = 'answered' WHERE id = ?`,
-      [queryId]
+      `INSERT INTO discord_outgoing (channel_id, content)
+       VALUES (?, ?)`,
+      [channelId, content]
     );
 
     return jsonResponse({
       success: true,
       type: "channel_reply",
-      message: `Channel reply sent for query #${queryId}`,
+      message: `Channel reply queued for channel ${channelId}`,
     });
   }
 
@@ -52,7 +48,7 @@ const botkaReplyHandler = async (args: Record<string, unknown>) => {
   }
 
   return errorResponse(
-    "either author_id (for DM) or query_id (for channel reply) is required"
+    "either author_id (for DM) or channel_id (for channel reply) is required"
   );
 };
 
@@ -63,13 +59,13 @@ export const botkaTools: ToolEntry[] = [
     definition: {
       name: "botka_reply",
       description:
-        "Reply to a Discord user via Botka. For DM replies, sends a DM. For channel queries (from [username@botka] with [#channel] prefix), replies in the Discord channel. Provide query_id to reply in channel.",
+        "Reply to a Discord user via Botka. For DM replies, provide author_id. For channel replies, provide channel_id (from botka_messages content).",
       inputSchema: {
         type: "object" as const,
         properties: {
           author_id: {
             type: "string",
-            description: "Discord user ID to reply to",
+            description: "Discord user ID to reply to (for DM)",
           },
           author_name: {
             type: "string",
@@ -79,10 +75,10 @@ export const botkaTools: ToolEntry[] = [
             type: "string",
             description: "Reply message content",
           },
-          query_id: {
-            type: "number",
+          channel_id: {
+            type: "string",
             description:
-              "Bot query ID (if replying to a channel query). When provided, the reply goes to the Discord channel instead of DM.",
+              "Discord channel ID (for channel reply). Extract from botka_messages content.",
           },
         },
         required: ["content"],

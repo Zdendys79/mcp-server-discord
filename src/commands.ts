@@ -155,6 +155,30 @@ export async function handlePrepis(
 ): Promise<void> {
   const member = message.member;
 
+  // Parse subcommand FIRST (before voice check)
+  const args = message.content.substring("/prepis".length).trim().toLowerCase();
+
+  // Stop/status commands don't require being in voice
+  if (args === "stop" || args === "konec") {
+    await handlePrepisStop(message);
+    return;
+  }
+
+  if (args === "status" || args === "stav") {
+    const status = getVoiceStatus();
+    if (status.activeSessions.length === 0) {
+      await message.reply("Zadny prepis momentalne neprobiha.");
+    } else {
+      const lines = status.activeSessions.map(
+        (s) =>
+          `Session ${s.sessionId}: ${s.chunkCount} chunks, ${s.durationSec}s`
+      );
+      await message.reply(`Aktivni prepisy:\n${lines.join("\n")}`);
+    }
+    return;
+  }
+
+  // For starting recording, user must be in voice
   if (!member?.voice.channel) {
     await message.reply(
       "Musis byt v hlasovem kanalu, abych se mohla pripojit a prepisovat."
@@ -182,28 +206,6 @@ export async function handlePrepis(
       );
       return;
     }
-  }
-
-  // Parse subcommand
-  const args = message.content.substring("/prepis".length).trim().toLowerCase();
-
-  if (args === "stop" || args === "konec") {
-    // Stop recording - handled separately
-    await handlePrepisStop(message);
-    return;
-  }
-
-  if (args === "status" || args === "stav") {
-    if (status.activeSessions.length === 0) {
-      await message.reply("Zadny prepis momentalne neprobiha.");
-    } else {
-      const lines = status.activeSessions.map(
-        (s) =>
-          `Session ${s.sessionId}: ${s.chunkCount} chunks, ${s.durationSec}s`
-      );
-      await message.reply(`Aktivni prepisy:\n${lines.join("\n")}`);
-    }
-    return;
   }
 
   // Join voice channel and start recording

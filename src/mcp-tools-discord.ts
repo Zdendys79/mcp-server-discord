@@ -263,6 +263,83 @@ const listGuildChannelsHandler = async (
   });
 };
 
+// --- Tool: discord_delete_messages ---
+
+const deleteMessagesHandler = async (
+  args: Record<string, unknown>
+) => {
+  const rest = requireDiscordRest();
+  const channelId = args.channel_id as string;
+  const messageIds = args.message_ids as string[];
+
+  if (!messageIds || messageIds.length === 0) {
+    return errorResponse("message_ids array is required and must not be empty.");
+  }
+
+  if (messageIds.length > 100) {
+    return errorResponse("Maximum 100 messages per call.");
+  }
+
+  // Messages older than 14 days cannot use bulk delete - delete one by one
+  const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const recentIds: string[] = [];
+  const oldIds: string[] = [];
+
+  for (const id of messageIds) {
+    // Discord snowflake: (id >> 22) + 1420070400000 = timestamp ms
+    const timestamp = Number(BigInt(id) >> 22n) + 1420070400000;
+    if (now - timestamp < TWO_WEEKS_MS) {
+      recentIds.push(id);
+    } else {
+      oldIds.push(id);
+    }
+  }
+
+  let bulkDeleted = 0;
+  let singleDeleted = 0;
+  const errors: string[] = [];
+
+  // Bulk delete recent messages (2+ messages required for bulk endpoint)
+  if (recentIds.length >= 2) {
+    try {
+      await rest.post(Routes.channelBulkDelete(channelId), {
+        body: { messages: recentIds },
+      });
+      bulkDeleted = recentIds.length;
+    } catch (err) {
+      errors.push(`Bulk delete failed: ${err instanceof Error ? err.message : String(err)}`);
+      // Fall back to single delete
+      oldIds.push(...recentIds);
+      recentIds.length = 0;
+    }
+  } else if (recentIds.length === 1) {
+    oldIds.push(recentIds[0]);
+  }
+
+  // Single delete for old messages (with rate limit delay)
+  for (const id of oldIds) {
+    try {
+      await rest.delete(Routes.channelMessage(channelId, id));
+      singleDeleted++;
+      // Small delay to avoid rate limits (Discord allows ~5 deletes/sec)
+      if (singleDeleted % 4 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+      }
+    } catch (err) {
+      errors.push(`Failed to delete ${id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return jsonResponse({
+    success: errors.length === 0,
+    deleted: bulkDeleted + singleDeleted,
+    bulk_deleted: bulkDeleted,
+    single_deleted: singleDeleted,
+    errors: errors.length > 0 ? errors : undefined,
+  });
+};
+
 // --- Tool: discord_bot_status ---
 
 const botStatusHandler = async () => {
@@ -457,6 +534,29 @@ export const discordTools: ToolEntry[] = [
       },
     },
     handler: fetchMessagesHandler,
+  },
+  {
+    definition: {
+      name: "discord_delete_messages",
+      description:
+        "Delete messages from a Discord channel. Bot can only delete its own messages or messages in channels where it has Manage Messages permission. Handles both recent (<14 days, bulk) and old (>14 days, one-by-one) messages.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          channel_id: {
+            type: "string",
+            description: "Discord channel ID",
+          },
+          message_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of message IDs to delete (max 100)",
+          },
+        },
+        required: ["channel_id", "message_ids"],
+      },
+    },
+    handler: deleteMessagesHandler,
   },
   {
     definition: {

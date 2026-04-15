@@ -14,6 +14,7 @@ import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import { unlink } from "node:fs/promises";
 import prism from "prism-media";
+import { readFile } from "node:fs/promises";
 import {
   createVoiceSession,
   endVoiceSession,
@@ -25,6 +26,19 @@ import {
 
 const RECORDINGS_DIR = path.join(process.cwd(), "recordings");
 const SILENCE_DURATION_MS = 300; // End recording after 300ms silence
+const RMS_SILENCE_THRESHOLD = 300; // Raw PCM s16le RMS below this = silence/noise (max ~32768)
+
+/** Compute RMS energy of raw PCM s16le buffer. Returns 0-32768 range. */
+function computeRms(buf: Buffer): number {
+  const samples = buf.length / 2; // 16-bit = 2 bytes per sample
+  if (samples === 0) return 0;
+  let sumSquares = 0;
+  for (let i = 0; i < buf.length; i += 2) {
+    const sample = buf.readInt16LE(i);
+    sumSquares += sample * sample;
+  }
+  return Math.sqrt(sumSquares / samples);
+}
 
 interface ActiveSession {
   sessionId: number;
@@ -32,6 +46,7 @@ interface ActiveSession {
   channelId: string;
   connection: VoiceConnection;
   chunkCount: number;
+  discardedSilent: number;
   startedAt: Date;
   consentedUsers: Set<string>;
   pendingConsent: Set<string>;
@@ -196,6 +211,28 @@ function handleSpeakingUser(
         return;
       }
 
+      // Check audio energy - discard silence/noise before expensive processing
+      try {
+        const rawBuf = await readFile(rawPath);
+        const rms = computeRms(rawBuf);
+        if (rms < RMS_SILENCE_THRESHOLD) {
+          // Log periodically for threshold calibration (every 20th discard)
+          session.discardedSilent = (session.discardedSilent || 0) + 1;
+          if (session.discardedSilent % 20 === 1) {
+            console.log(
+              `[VOICE] Session ${session.sessionId}: discarded silent chunk ` +
+              `(RMS=${Math.round(rms)}, threshold=${RMS_SILENCE_THRESHOLD}, ` +
+              `total_discarded=${session.discardedSilent})`
+            );
+          }
+          await unlink(rawPath).catch(() => {});
+          return;
+        }
+      } catch {
+        await unlink(rawPath).catch(() => {});
+        return;
+      }
+
       // Normalize with ffmpeg
       try {
         const fileSize = await normalizeChunk(rawPath, finalPath);
@@ -308,6 +345,7 @@ export async function joinAndRecord(
     channelId,
     connection,
     chunkCount: 0,
+    discardedSilent: 0,
     startedAt: new Date(),
     consentedUsers: new Set(),
     pendingConsent: new Set(),
@@ -405,7 +443,8 @@ export async function leaveAndStop(
   );
 
   console.log(
-    `[VOICE] Recording ended: session ${session.sessionId}, ${session.chunkCount} chunks, ${durationSec}s`
+    `[VOICE] Recording ended: session ${session.sessionId}, ` +
+    `${session.chunkCount} chunks saved, ${session.discardedSilent} silent discarded, ${durationSec}s`
   );
 
   return {

@@ -24,6 +24,7 @@ import {
   markOutgoingFailed,
   cancelPendingBotQueries,
   cancelPendingBotkaMessages,
+  resetStuckMessages,
 } from "./db.js";
 import {
   joinAndRecord,
@@ -82,6 +83,17 @@ client.once(Events.ClientReady, (c) => {
        ON DUPLICATE KEY UPDATE value = NOW()`
     )
     .catch((err) => console.error("[BOT] Failed to update bot_config:", err.message));
+
+  // Reset messages stuck in 'sending' state from before restart
+  resetStuckMessages()
+    .then(({ outgoing, replies }) => {
+      if (outgoing > 0 || replies > 0) {
+        console.log(
+          `[BOT] Startup cleanup: reset ${outgoing} outgoing + ${replies} replies from 'sending' back to 'pending'`
+        );
+      }
+    })
+    .catch((err) => console.error("[BOT] Startup cleanup failed:", err.message));
 
   // Voice command IPC polling (MCP -> bot communication)
   setInterval(async () => {

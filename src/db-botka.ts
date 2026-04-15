@@ -187,6 +187,27 @@ export async function cancelPendingBotkaMessages(authorId: string): Promise<numb
   return result.affectedRows;
 }
 
+// --- Startup cleanup ---
+
+/** Reset stuck 'sending' messages back to 'pending' on bot startup.
+ *  This handles the case where bot crashed/restarted mid-delivery. */
+export async function resetStuckMessages(): Promise<{ outgoing: number; replies: number }> {
+  const db = getPool();
+
+  const [outResult] = await db.execute<mysql.ResultSetHeader>(
+    `UPDATE discord_outgoing SET status = 'pending' WHERE status = 'sending'`
+  );
+
+  const [repResult] = await db.execute<mysql.ResultSetHeader>(
+    `UPDATE botka_replies SET status = 'pending' WHERE status = 'sending'`
+  );
+
+  return {
+    outgoing: outResult.affectedRows,
+    replies: repResult.affectedRows,
+  };
+}
+
 // --- User status functions ---
 
 /** Get user's interaction statistics with Botka. */

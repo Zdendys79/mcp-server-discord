@@ -22,20 +22,37 @@ export async function insertBotkaMessage(params: {
 
 // --- Botka replies (Claude -> Discord DM) ---
 
-/** Get pending replies to send as Discord DMs. */
+/** Get pending replies to send as Discord DMs. Atomically marks them as 'sending' to prevent duplicate delivery. */
 export async function getPendingBotkaReplies(): Promise<mysql.RowDataPacket[]> {
   const db = getPool();
-  const [rows] = await db.execute<mysql.RowDataPacket[]>(
-    `SELECT * FROM botka_replies WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10`
-  );
-  return rows;
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+      `SELECT * FROM botka_replies WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10 FOR UPDATE`
+    );
+    if (rows.length > 0) {
+      const ids = rows.map((r: mysql.RowDataPacket) => r.id);
+      await conn.execute(
+        `UPDATE botka_replies SET status = 'sending' WHERE id IN (${ids.map(() => '?').join(',')})`,
+        ids
+      );
+    }
+    await conn.commit();
+    return rows;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 }
 
 /** Mark a botka reply as sent. */
 export async function markBotkaReplySent(replyId: number): Promise<void> {
   const db = getPool();
   await db.execute(
-    `UPDATE botka_replies SET status = 'sent', sent_at = NOW() WHERE id = ?`,
+    `UPDATE botka_replies SET status = 'sent', sent_at = NOW() WHERE id = ? AND status = 'sending'`,
     [replyId]
   );
 }
@@ -44,7 +61,7 @@ export async function markBotkaReplySent(replyId: number): Promise<void> {
 export async function markBotkaReplyFailed(replyId: number): Promise<void> {
   const db = getPool();
   await db.execute(
-    `UPDATE botka_replies SET status = 'failed' WHERE id = ?`,
+    `UPDATE botka_replies SET status = 'failed' WHERE id = ? AND status = 'sending'`,
     [replyId]
   );
 }
@@ -100,31 +117,48 @@ export async function getBotQueryStatus(
 
 // --- Discord outgoing messages (live transcription -> channel) ---
 
-/** Get pending outgoing messages for bot to send. */
+/** Get pending outgoing messages for bot to send. Atomically marks them as 'sending' to prevent duplicate delivery. */
 export async function getPendingOutgoingMessages(): Promise<
   mysql.RowDataPacket[]
 > {
   const db = getPool();
-  const [rows] = await db.execute<mysql.RowDataPacket[]>(
-    `SELECT * FROM discord_outgoing WHERE status = 'pending' ORDER BY created_at ASC LIMIT 20`
-  );
-  return rows;
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+      `SELECT * FROM discord_outgoing WHERE status = 'pending' ORDER BY created_at ASC LIMIT 20 FOR UPDATE`
+    );
+    if (rows.length > 0) {
+      const ids = rows.map((r) => r.id);
+      await conn.execute(
+        `UPDATE discord_outgoing SET status = 'sending' WHERE id IN (${ids.map(() => '?').join(',')})`,
+        ids
+      );
+    }
+    await conn.commit();
+    return rows;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 }
 
 /** Mark outgoing message as sent. */
 export async function markOutgoingSent(id: number): Promise<void> {
   const db = getPool();
   await db.execute(
-    `UPDATE discord_outgoing SET status = 'sent', sent_at = NOW() WHERE id = ?`,
+    `UPDATE discord_outgoing SET status = 'sent', sent_at = NOW() WHERE id = ? AND status = 'sending'`,
     [id]
   );
 }
 
-/** Mark outgoing message as failed. */
+/** Mark outgoing message as failed (resets to pending for retry). */
 export async function markOutgoingFailed(id: number): Promise<void> {
   const db = getPool();
   await db.execute(
-    `UPDATE discord_outgoing SET status = 'failed' WHERE id = ?`,
+    `UPDATE discord_outgoing SET status = 'failed' WHERE id = ? AND status = 'sending'`,
     [id]
   );
 }

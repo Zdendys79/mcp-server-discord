@@ -274,7 +274,7 @@ client.on(Events.MessageCreate, async (message) => {
           await handleAnketa(message);
         } else if (lower.startsWith("/prepis")) {
           await handlePrepis(message, client);
-        } else if (lower === "/nahravej") {
+        } else if (lower === "/nahravej" || lower === "/zaznam") {
           await handleNahravej(message, client);
         } else if (lower === "/botka_status") {
           await handleBotkaStatus(message);

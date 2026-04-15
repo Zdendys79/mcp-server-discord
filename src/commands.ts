@@ -421,6 +421,7 @@ export function isCommand(content: string): boolean {
     lower.startsWith("/anketa") ||
     lower.startsWith("/prepis") ||
     lower === "/nahravej" ||
+    lower === "/zaznam" ||
     lower === "/botka_status" ||
     lower === "/botka_disable" ||
     lower === "/zakaz"

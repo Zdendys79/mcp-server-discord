@@ -1,8 +1,17 @@
 // Command handlers for /anketa and /prepis
-import { Message, Client, TextChannel, ChannelType, DMChannel } from "discord.js";
+import { Message, Client, TextChannel, ChannelType, DMChannel, PermissionFlagsBits } from "discord.js";
 import { joinAndRecord, getVoiceStatus } from "./voice.js";
 import { insertBotkaMessage, revokeConsent, getUserBotkaStats } from "./db.js";
 import { getPool } from "./db.js";
+
+/** Check if user has permission to start voice recording. */
+function canStartRecording(message: Message): boolean {
+  if (!message.member) return false;
+  return (
+    message.member.permissions.has(PermissionFlagsBits.ManageGuild) ||
+    message.guild?.ownerId === message.author.id
+  );
+}
 
 // Regional indicator emojis A-T (max 20 options)
 const REGIONAL_INDICATORS = [
@@ -178,6 +187,12 @@ export async function handlePrepis(
     return;
   }
 
+  // Permission check - only guild admin/owner can start recording
+  if (!canStartRecording(message)) {
+    await message.reply("Nahravani muze spustit pouze spravce serveru.");
+    return;
+  }
+
   // For starting recording, user must be in voice
   if (!member?.voice.channel) {
     await message.reply(
@@ -290,6 +305,12 @@ export async function handleNahravej(
   client: Client
 ): Promise<void> {
   const member = message.member;
+
+  // Permission check - only guild admin/owner can start recording
+  if (!canStartRecording(message)) {
+    await message.reply("Nahravani muze spustit pouze spravce serveru.");
+    return;
+  }
 
   if (!member?.voice.channel) {
     await message.reply(

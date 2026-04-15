@@ -1,5 +1,5 @@
 // Discord Bot Daemon "Botka" - runs 24/7 via PM2, logs messages to MariaDB
-import { Client, GatewayIntentBits, Events, Partials } from "discord.js";
+import { Client, GatewayIntentBits, Events, Partials, TextChannel } from "discord.js";
 import {
   storeMessage,
   ensureChannel,
@@ -158,28 +158,34 @@ client.once(Events.ClientReady, (c) => {
         }
       }
     } catch (err) {
-      // Silently ignore DB poll errors
+      console.error("[BOT] Botka reply poll error:", err instanceof Error ? err.message : err);
     }
   }, 5000);
 
     // Outgoing messages polling (live transcription -> Discord channel)
+    // Rate limited: max 4 messages per poll cycle (Discord limit ~5/5s per channel)
     setInterval(async () => {
       try {
         const msgs = await getPendingOutgoingMessages();
+        let sent = 0;
         for (const msg of msgs) {
+          if (sent >= 4) break; // Rate limit protection
           try {
             const channel = await c.channels.fetch(msg.channel_id);
             if (channel && channel.isTextBased() && "send" in channel) {
-              await (channel as any).send(msg.content);
+              await (channel as TextChannel).send(msg.content);
             }
             await markOutgoingSent(msg.id);
+            sent++;
           } catch (err) {
             console.error(`[BOT] Failed to send outgoing ${msg.id}:`, err instanceof Error ? err.message : err);
             await markOutgoingFailed(msg.id);
           }
         }
-      } catch (err) { /* ignore */ }
-    }, 3000);
+      } catch (err) {
+        console.error("[BOT] Outgoing poll error:", err instanceof Error ? err.message : err);
+      }
+    }, 5000);
 });
 
 client.on(Events.MessageCreate, async (message) => {

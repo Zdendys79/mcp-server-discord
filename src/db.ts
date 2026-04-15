@@ -5,15 +5,19 @@ let pool: mysql.Pool | null = null;
 
 export function getPool(): mysql.Pool {
   if (!pool) {
+    const password =
+      process.env.MARIADB_PASSWORD ||
+      process.env.DB_PASS ||
+      process.env.DB_PASSWORD ||
+      "";
+    if (!password) {
+      console.error("[DB] WARNING: No database password configured (MARIADB_PASSWORD/DB_PASS/DB_PASSWORD)");
+    }
     pool = mysql.createPool({
       host: process.env.DB_HOST || "127.0.0.1",
       port: parseInt(process.env.DB_PORT || "3306"),
       user: process.env.DB_USER || "claude",
-      password:
-        process.env.MARIADB_PASSWORD ||
-        process.env.DB_PASS ||
-        process.env.DB_PASSWORD ||
-        "",
+      password,
       database: process.env.DB_NAME || "discord_dh",
       connectionLimit: 10,
       waitForConnections: true,

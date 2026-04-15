@@ -128,3 +128,80 @@ export async function markOutgoingFailed(id: number): Promise<void> {
     [id]
   );
 }
+
+// --- Stop/cancel functions ---
+
+/** Cancel pending bot queries for a user (/stop). */
+export async function cancelPendingBotQueries(authorId: string): Promise<number> {
+  const db = getPool();
+  const [result] = await db.execute<mysql.ResultSetHeader>(
+    `UPDATE bot_queries SET status = 'error', error_message = 'Cancelled by /stop'
+     WHERE author_id = ? AND status IN ('pending', 'processing')`,
+    [authorId]
+  );
+  return result.affectedRows;
+}
+
+/** Cancel pending botka messages for a user (/stop). */
+export async function cancelPendingBotkaMessages(authorId: string): Promise<number> {
+  const db = getPool();
+  const [result] = await db.execute<mysql.ResultSetHeader>(
+    `UPDATE botka_messages SET status = 'failed'
+     WHERE author_id = ? AND status = 'pending'`,
+    [authorId]
+  );
+  return result.affectedRows;
+}
+
+// --- User status functions ---
+
+/** Get user's interaction statistics with Botka. */
+export async function getUserBotkaStats(userId: string): Promise<{
+  total_conversations: number;
+  total_recordings: number;
+  total_chunks: number;
+  consent_status: string;
+  last_interaction: string | null;
+}> {
+  const db = getPool();
+
+  const [convRows] = await db.execute<mysql.RowDataPacket[]>(
+    `SELECT COUNT(*) as total FROM botka_messages WHERE author_id = ?`,
+    [userId]
+  );
+
+  const [recRows] = await db.execute<mysql.RowDataPacket[]>(
+    `SELECT COUNT(DISTINCT vs.id) as sessions, COALESCE(SUM(vs.total_chunks), 0) as chunks
+     FROM voice_sessions vs
+     JOIN voice_chunks vc ON vs.id = vc.session_id
+     WHERE vc.speaker_id = ?`,
+    [userId]
+  );
+
+  const [consentRows] = await db.execute<mysql.RowDataPacket[]>(
+    `SELECT consent_type, granted_at FROM user_consents
+     WHERE user_id = ? AND is_active = TRUE
+     ORDER BY granted_at DESC LIMIT 1`,
+    [userId]
+  );
+
+  const [lastRows] = await db.execute<mysql.RowDataPacket[]>(
+    `SELECT MAX(created_at) as last_at FROM botka_messages WHERE author_id = ?`,
+    [userId]
+  );
+
+  let consentStatus = "zadny souhlas";
+  if (consentRows.length > 0) {
+    consentStatus = consentRows[0].consent_type === "permanent"
+      ? "trvaly souhlas"
+      : "jednorazovy souhlas";
+  }
+
+  return {
+    total_conversations: convRows[0].total,
+    total_recordings: recRows[0].sessions,
+    total_chunks: recRows[0].chunks,
+    consent_status: consentStatus,
+    last_interaction: lastRows[0].last_at,
+  };
+}

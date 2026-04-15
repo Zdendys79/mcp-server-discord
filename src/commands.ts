@@ -1,7 +1,7 @@
 // Command handlers for /anketa and /prepis
 import { Message, Client, TextChannel, ChannelType, DMChannel } from "discord.js";
 import { joinAndRecord, getVoiceStatus } from "./voice.js";
-import { insertBotkaMessage } from "./db.js";
+import { insertBotkaMessage, revokeConsent, getUserBotkaStats } from "./db.js";
 import { getPool } from "./db.js";
 
 // Regional indicator emojis A-T (max 20 options)
@@ -283,10 +283,125 @@ async function handlePrepisStop(message: Message): Promise<void> {
 }
 
 /**
+ * Handle /nahravej command - join voice channel and record audio only (no transcription).
+ */
+export async function handleNahravej(
+  message: Message,
+  client: Client
+): Promise<void> {
+  const member = message.member;
+
+  if (!member?.voice.channel) {
+    await message.reply(
+      "Musis byt v hlasovem kanalu, abych se mohla pripojit a nahravat."
+    );
+    return;
+  }
+
+  const voiceChannel = member.voice.channel;
+  const displayName = member.displayName || message.author.username;
+
+  // Check if already recording in this guild
+  const status = getVoiceStatus();
+  const guildId = message.guild?.id;
+  if (guildId) {
+    const existing = status.activeSessions.find((s) => s.guildId === guildId);
+    if (existing) {
+      await message.reply(
+        `Uz nahravam v tomto serveru (session ${existing.sessionId}). ` +
+        `Pouzij /stop pro ukonceni.`
+      );
+      return;
+    }
+  }
+
+  try {
+    const info = await joinAndRecord(client, voiceChannel.id, {
+      mode: "record_only",
+      requestedBy: message.author.id,
+    });
+
+    await message.reply(
+      `Nahravani spusteno v kanale **#${voiceChannel.name}** (session ${info.sessionId}).\n` +
+      `Pouze audio, bez prepisu. Pro zastaveni pouzij /stop.`
+    );
+
+    await insertBotkaMessage({
+      source: "system",
+      author_id: null,
+      author_name: null,
+      content:
+        `Voice recording (no transcription) started by ${displayName} in #${voiceChannel.name} ` +
+        `(session ${info.sessionId}).`,
+    });
+
+    console.log(
+      `[CMD] /nahravej by ${displayName}: joined #${voiceChannel.name}, session ${info.sessionId}`
+    );
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await message.reply(`Nepodarilo se pripojit: ${errMsg}`);
+    console.error(`[CMD] /nahravej error:`, errMsg);
+  }
+}
+
+/**
+ * Handle /botka_status - show user's interaction overview.
+ */
+export async function handleBotkaStatus(message: Message): Promise<void> {
+  try {
+    const stats = await getUserBotkaStats(message.author.id);
+    const lines = [
+      `**Tvuj prehled u Botky:**`,
+      `Konverzace: ${stats.total_conversations}`,
+      `Nahravky: ${stats.total_recordings} session, ${stats.total_chunks} chunku`,
+      `Souhlas s nahravanim: ${stats.consent_status}`,
+    ];
+    if (stats.last_interaction) {
+      lines.push(`Posledni interakce: ${new Date(stats.last_interaction).toLocaleString("cs-CZ")}`);
+    }
+    await message.reply(lines.join("\n"));
+    console.log(`[CMD] /botka_status for ${message.author.username}`);
+  } catch (err) {
+    await message.reply("Chyba pri nacitani statistik.");
+    console.error("[CMD] /botka_status error:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Handle /botka_disable or /zakaz - revoke recording consent (GDPR opt-out).
+ */
+export async function handleBotkaDisable(message: Message): Promise<void> {
+  try {
+    const revoked = await revokeConsent(message.author.id);
+    if (revoked > 0) {
+      await message.reply(
+        `Souhlas s nahravanim odvolan (${revoked} zaznamu). ` +
+        `Botka te nebude nahravat, dokud znovu neudelas souhlas.`
+      );
+    } else {
+      await message.reply("Nemas zadny aktivni souhlas s nahravanim.");
+    }
+    console.log(`[CMD] Consent revoked for ${message.author.username}: ${revoked} records`);
+  } catch (err) {
+    await message.reply("Chyba pri odvolavani souhlasu.");
+    console.error("[CMD] /botka_disable error:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
  * Check if a message is a known command and handle it.
  * Returns true if handled (caller should not process further).
+ * NOTE: /stop is NOT here - it's hardcoded in bot.ts as emergency handler.
  */
 export function isCommand(content: string): boolean {
-  const lower = content.toLowerCase();
-  return lower.startsWith("/anketa") || lower.startsWith("/prepis");
+  const lower = content.toLowerCase().trim();
+  return (
+    lower.startsWith("/anketa") ||
+    lower.startsWith("/prepis") ||
+    lower === "/nahravej" ||
+    lower === "/botka_status" ||
+    lower === "/botka_disable" ||
+    lower === "/zakaz"
+  );
 }

@@ -7,11 +7,22 @@ export async function createVoiceSession(params: {
   guild_id: string;
   channel_id: string;
   channel_name: string | null;
+  mode?: "transcribe" | "record_only";
+  output_channel_id?: string | null;
+  requested_by?: string | null;
 }): Promise<number> {
   const db = getPool();
   const [result] = await db.execute<mysql.ResultSetHeader>(
-    `INSERT INTO voice_sessions (guild_id, channel_id, channel_name) VALUES (?, ?, ?)`,
-    [params.guild_id, params.channel_id, params.channel_name]
+    `INSERT INTO voice_sessions (guild_id, channel_id, channel_name, mode, output_channel_id, requested_by)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      params.guild_id,
+      params.channel_id,
+      params.channel_name,
+      params.mode || "transcribe",
+      params.output_channel_id || null,
+      params.requested_by || null,
+    ]
   );
   return result.insertId;
 }

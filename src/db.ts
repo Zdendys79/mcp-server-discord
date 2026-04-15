@@ -81,4 +81,7 @@ export {
   getPendingOutgoingMessages,
   markOutgoingSent,
   markOutgoingFailed,
+  cancelPendingBotQueries,
+  cancelPendingBotkaMessages,
+  getUserBotkaStats,
 } from "./db-botka.js";

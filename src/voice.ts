@@ -35,10 +35,21 @@ interface ActiveSession {
   startedAt: Date;
   consentedUsers: Set<string>;
   pendingConsent: Set<string>;
+  requestedBy: string | null;
 }
 
 // One active session per guild
 const activeSessions = new Map<string, ActiveSession>();
+
+/** Find active session requested by a specific user (for /stop). */
+export function findSessionByRequester(userId: string): ActiveSession | null {
+  for (const session of activeSessions.values()) {
+    if (session.requestedBy === userId) {
+      return session;
+    }
+  }
+  return null;
+}
 
 function formatTimestamp(date: Date): string {
   const y = date.getFullYear();
@@ -239,7 +250,12 @@ function handleSpeakingUser(
 
 export async function joinAndRecord(
   client: Client,
-  channelId: string
+  channelId: string,
+  options?: {
+    mode?: "transcribe" | "record_only";
+    outputChannelId?: string | null;
+    requestedBy?: string | null;
+  }
 ): Promise<{ sessionId: number; channelName: string }> {
   const channel = await client.channels.fetch(channelId);
   if (!channel || !(channel instanceof VoiceChannel)) {
@@ -264,6 +280,9 @@ export async function joinAndRecord(
     guild_id: guildId,
     channel_id: channelId,
     channel_name: channel.name,
+    mode: options?.mode || "transcribe",
+    output_channel_id: options?.outputChannelId || null,
+    requested_by: options?.requestedBy || null,
   });
 
   // Join voice channel
@@ -292,6 +311,7 @@ export async function joinAndRecord(
     startedAt: new Date(),
     consentedUsers: new Set(),
     pendingConsent: new Set(),
+    requestedBy: options?.requestedBy || null,
   };
 
   activeSessions.set(guildId, session);

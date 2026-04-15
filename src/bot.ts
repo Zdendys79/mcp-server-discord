@@ -22,6 +22,8 @@ import {
   getPendingOutgoingMessages,
   markOutgoingSent,
   markOutgoingFailed,
+  cancelPendingBotQueries,
+  cancelPendingBotkaMessages,
 } from "./db.js";
 import {
   joinAndRecord,
@@ -29,8 +31,16 @@ import {
   getVoiceStatus,
   handleConsentResponse,
   hasPendingConsent,
+  findSessionByRequester,
 } from "./voice.js";
-import { isCommand, handleAnketa, handlePrepis } from "./commands.js";
+import {
+  isCommand,
+  handleAnketa,
+  handlePrepis,
+  handleNahravej,
+  handleBotkaStatus,
+  handleBotkaDisable,
+} from "./commands.js";
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 if (!TOKEN) {
@@ -177,6 +187,42 @@ client.on(Events.MessageCreate, async (message) => {
     // Skip bot messages
     if (message.author.bot) return;
 
+    // === /stop - EMERGENCY COMMAND (hardcoded, no LLM, MUST be first!) ===
+    if (message.content.toLowerCase().trim() === "/stop") {
+      const userId = message.author.id;
+      const results: string[] = [];
+
+      // 1. Stop voice recording if user requested it
+      const session = findSessionByRequester(userId);
+      if (session) {
+        const info = await leaveAndStop(session.guildId);
+        if (info) {
+          await revokeSessionConsents(info.sessionId);
+          results.push(`Nahravani zastaveno (session ${info.sessionId}, ${info.chunks} chunku)`);
+        }
+      }
+
+      // 2. Cancel pending bot queries from this user
+      const cancelledQueries = await cancelPendingBotQueries(userId);
+      if (cancelledQueries > 0) {
+        results.push(`Zruseno ${cancelledQueries} rozpracovanych dotazu`);
+      }
+
+      // 3. Cancel pending botka messages from this user
+      const cancelledMessages = await cancelPendingBotkaMessages(userId);
+      if (cancelledMessages > 0) {
+        results.push(`Zruseno ${cancelledMessages} nedorucenych zprav`);
+      }
+
+      const summary = results.length > 0
+        ? results.join(". ") + "."
+        : "Zadna aktivni cinnost k zastaveni.";
+
+      await message.reply(`[STOP] ${summary}`);
+      console.log(`[BOT] /stop from ${message.author.username}: ${summary}`);
+      return;
+    }
+
     // Handle DM messages
     if (!message.guild) {
       // Check if user has pending consent request
@@ -203,13 +249,19 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-      // Handle /anketa and /prepis commands (before /botka)
+      // Handle slash commands (before /botka)
       if (message.guild && isCommand(message.content)) {
-        const lower = message.content.toLowerCase();
+        const lower = message.content.toLowerCase().trim();
         if (lower.startsWith("/anketa")) {
           await handleAnketa(message);
         } else if (lower.startsWith("/prepis")) {
           await handlePrepis(message, client);
+        } else if (lower === "/nahravej") {
+          await handleNahravej(message, client);
+        } else if (lower === "/botka_status") {
+          await handleBotkaStatus(message);
+        } else if (lower === "/botka_disable" || lower === "/zakaz") {
+          await handleBotkaDisable(message);
         }
         return;
       }

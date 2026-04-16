@@ -410,6 +410,90 @@ export async function handleBotkaDisable(message: Message): Promise<void> {
   }
 }
 
+/**
+ * Pevná část uvítací zprávy (příkazy, možnosti).
+ * Claude k ní připojí aktuální stav a personalizaci při prvním kontaktu přes relay.
+ * Při /botka_intro se posílá tato pevná část okamžitě (bez čekání na Claude).
+ */
+export const INTRO_MESSAGE =
+  `Ahoj! Jsem **Botka** 🤖 – pomocnice komunity Dračí hlídky.\n\n` +
+  `**Co umím:**\n` +
+  `- Odpovídat na dotazy v kanálech i v DM\n` +
+  `- Nahrávat hlasové kanály a pořizovat přepisy\n\n` +
+  `**Příkazy:**\n` +
+  `\`/botka [text]\` – dotaz v kanálu (nebo mě zmíň)\n` +
+  `\`/nahravej\` – záznam hlasového kanálu (bez přepisu)\n` +
+  `\`/prepis\` – záznam + automatický přepis\n` +
+  `\`/prepis stop\` – ukončí nahrávání\n` +
+  `\`/prepis status\` – aktivní nahrávání\n` +
+  `\`/anketa Otázka | Možnost A | Možnost B\` – anketa s reakcemi\n` +
+  `\`/botka_status\` – tvůj přehled interakcí\n` +
+  `\`/botka_disable\` – odvolání souhlasu s nahráváním\n` +
+  `\`/botka_intro\` – zobrazí tuto zprávu znovu\n\n` +
+  `Tuto zprávu si kdykoli zobrazíš znovu příkazem \`/botka_intro\`. 👋`;
+
+/** Detailní výpis všech příkazů – posílá se do DM. */
+export const COMMANDS_MESSAGE =
+  `**Příkazy Botky – úplný přehled**\n\n` +
+
+  `**💬 Komunikace**\n` +
+  `\`/botka [text]\` – pošli mi dotaz nebo zprávu přímo v kanálu\n` +
+  `_(alternativa: zmiň mě v kanálu nebo napiš přímo do DM)_\n\n` +
+
+  `**🎙️ Nahrávání hlasu**\n` +
+  `\`/nahravej\` – připojí Botku do tvého hlasového kanálu a spustí záznam\n` +
+  `_(audio se uloží, bez automatického přepisu)_\n` +
+  `\`/prepis\` – záznam + automatický přepis do textového kanálu\n` +
+  `\`/prepis stop\` nebo \`/prepis konec\` – ukončí aktivní nahrávání\n` +
+  `\`/prepis status\` nebo \`/prepis stav\` – zobrazí probíhající nahrávání\n\n` +
+
+  `**📊 Ankety**\n` +
+  `\`/anketa Otázka | Možnost A | Možnost B | ...\` – vytvoří anketu s hlasováním pomocí reakcí\n` +
+  `_(max. 20 možností, Botka zkontroluje překlepy a požádá o potvrzení)_\n\n` +
+
+  `**⚙️ Správa**\n` +
+  `\`/botka_status\` – tvůj přehled: počet konverzací, nahrávek, stav souhlasu\n` +
+  `\`/botka_disable\` nebo \`/zakaz\` – odvolání souhlasu s nahráváním (GDPR opt-out)\n` +
+  `\`/stop\` – nouzové zastavení všech aktivních akcí (nahrávání, čekající dotazy)\n\n` +
+
+  `**ℹ️ Nápověda**\n` +
+  `\`/botka_intro\` – úvodní informace o Botce\n` +
+  `\`/botka_prikazy\` – tento přehled příkazů\n`;
+
+/**
+ * Handle /botka_prikazy – send detailed command list to DM.
+ */
+export async function handleBotkaPrikazy(message: Message): Promise<void> {
+  try {
+    const dm = await message.author.createDM();
+    await dm.send(COMMANDS_MESSAGE);
+    if (message.guild) {
+      await message.reply("Poslala jsem ti přehled příkazů do DM. 📬");
+    }
+    console.log(`[CMD] /botka_prikazy for ${message.author.username}`);
+  } catch (err) {
+    await message.reply("Nepodařilo se odeslat DM – zkontroluj, zda máš povoleny zprávy od botů.");
+    console.error("[CMD] /botka_prikazy error:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Handle /botka_intro – send intro DM to the user (always, regardless of history).
+ */
+export async function handleBotkaIntro(message: Message): Promise<void> {
+  try {
+    const dm = await message.author.createDM();
+    await dm.send(INTRO_MESSAGE);
+    if (message.guild) {
+      await message.reply("Poslala jsem ti úvodní informace do DM. 📬");
+    }
+    console.log(`[CMD] /botka_intro for ${message.author.username}`);
+  } catch (err) {
+    await message.reply("Nepodařilo se odeslat DM – zkontroluj, zda máš povoleny zprávy od botů.");
+    console.error("[CMD] /botka_intro error:", err instanceof Error ? err.message : err);
+  }
+}
+
 /** Strip invisible characters and extract the command word (first token after /). */
 export function cleanCommand(content: string): string {
   // Remove zero-width spaces, non-breaking spaces, and other invisible Unicode
@@ -434,6 +518,8 @@ export function isCommand(content: string): boolean {
     cmd === "/zaznam" ||
     cmd === "/botka_status" ||
     cmd === "/botka_disable" ||
-    cmd === "/zakaz"
+    cmd === "/zakaz" ||
+    cmd === "/botka_intro" ||
+    cmd === "/botka_prikazy"
   );
 }

@@ -1,5 +1,6 @@
 // Discord Bot Daemon "Botka" - runs 24/7 via PM2, logs messages to MariaDB
 import { Client, GatewayIntentBits, Events, Partials, TextChannel } from "discord.js";
+import type mysql from "mysql2/promise";
 import {
   storeMessage,
   ensureChannel,
@@ -42,6 +43,9 @@ import {
   handleNahravej,
   handleBotkaStatus,
   handleBotkaDisable,
+  handleBotkaIntro,
+  handleBotkaPrikazy,
+  INTRO_MESSAGE,
 } from "./commands.js";
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -66,6 +70,36 @@ const client = new Client({
 
 let messageCount = 0;
 
+// Users who already received the intro DM – loaded from DB on startup.
+const knownUsers = new Set<string>();
+
+/** Load known users from DB to avoid sending intro twice after restart. */
+async function loadKnownUsers(): Promise<void> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT DISTINCT author_id FROM botka_messages WHERE author_id IS NOT NULL
+     UNION
+     SELECT DISTINCT author_id FROM bot_queries WHERE author_id IS NOT NULL`
+  );
+  for (const row of rows) knownUsers.add(row.author_id as string);
+  console.log(`[BOT] Loaded ${knownUsers.size} known users`);
+}
+
+/**
+ * Send intro DM on first contact.
+ * Uses knownUsers cache; DB is source of truth on startup.
+ */
+async function sendIntroIfNeeded(user: import("discord.js").User): Promise<void> {
+  if (knownUsers.has(user.id)) return;
+  knownUsers.add(user.id); // Mark immediately to avoid duplicate sends
+  try {
+    const dm = await user.createDM();
+    await dm.send(INTRO_MESSAGE);
+    console.log(`[BOT] Intro DM sent to ${user.username}`);
+  } catch (err) {
+    console.error(`[BOT] Failed to send intro DM to ${user.username}:`, err instanceof Error ? err.message : err);
+  }
+}
+
 client.once(Events.ClientReady, (c) => {
   console.log(`[BOT] Logged in as ${c.user.tag}`);
   console.log(`[BOT] Serving ${c.guilds.cache.size} guild(s)`);
@@ -84,6 +118,9 @@ client.once(Events.ClientReady, (c) => {
        ON DUPLICATE KEY UPDATE value = NOW()`
     )
     .catch((err) => console.error("[BOT] Failed to update bot_config:", err.message));
+
+  // Load known users for intro DM tracking
+  loadKnownUsers().catch((err) => console.error("[BOT] loadKnownUsers failed:", err.message));
 
   // Reset messages stuck in 'sending' state from before restart
   resetStuckMessages()
@@ -242,6 +279,9 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
+    // Send intro DM on first contact (DM or slash command)
+    await sendIntroIfNeeded(message.author);
+
     // Handle DM messages
     if (!message.guild) {
       // Check if user has pending consent request
@@ -271,16 +311,16 @@ client.on(Events.MessageCreate, async (message) => {
       // Handle slash commands (before /botka)
       if (message.guild && isCommand(message.content)) {
         const cmd = cleanCommand(message.content);
-        if (cmd.startsWith("/anketa")) {
-          await handleAnketa(message);
-        } else if (cmd.startsWith("/prepis")) {
-          await handlePrepis(message, client);
-        } else if (cmd === "/nahravej" || cmd === "/zaznam") {
-          await handleNahravej(message, client);
-        } else if (cmd === "/botka_status") {
-          await handleBotkaStatus(message);
-        } else if (cmd === "/botka_disable" || cmd === "/zakaz") {
-          await handleBotkaDisable(message);
+        switch (true) {
+          case cmd.startsWith("/anketa"):  await handleAnketa(message); break;
+          case cmd.startsWith("/prepis"):  await handlePrepis(message, client); break;
+          case cmd === "/nahravej":
+          case cmd === "/zaznam":          await handleNahravej(message, client); break;
+          case cmd === "/botka_status":    await handleBotkaStatus(message); break;
+          case cmd === "/botka_disable":
+          case cmd === "/zakaz":           await handleBotkaDisable(message); break;
+          case cmd === "/botka_intro":     await handleBotkaIntro(message); break;
+          case cmd === "/botka_prikazy":   await handleBotkaPrikazy(message); break;
         }
         return;
       }

@@ -1,7 +1,7 @@
 # STATUS.md - mcp-server-discord
 
-**Last Updated:** 2026-02-15
-**Current Phase:** Bot running, MCP functional, missing guild discovery tools
+**Last Updated:** 2026-04-16
+**Current Phase:** Bot running, MCP functional, user onboarding implemented
 
 ---
 
@@ -11,7 +11,22 @@
 - MCP server: Functional, launched via SSH from jz-work
 - Database: `discord_dh` on base7 MariaDB (schema OK)
 - Guild: SF&F Club DRAKONIAN Most (263381917523640321) - 30 text channels
-- Monitored channels: 1 (dh-trigon-u-zdendyse, test)
+- Monitored channels: 12
+
+---
+
+## Changelog
+
+### 2026-04-16
+- **User onboarding**: Intro DM sent automatically on first contact (any DM or slash command)
+  - `knownUsers` Set loaded from DB on startup to prevent duplicate sends after restart
+- **New commands**: `/botka_intro`, `/botka_prikazy`
+- **Refactor**: Command dispatch in `bot.ts` switched from `else if` chain to `switch (true)`
+- **Channel query flow**: Refactored from `discord_outgoing` to `bot_queries` table
+  - Bot polls `bot_query_responses` instead of `discord_outgoing`
+  - Patience message sent after 20s wait, deleted on response
+  - Long responses split into 1990-char chunks (Discord 2000 char limit)
+- **`/prepis stop`**: Fixed to work without being in a voice channel
 
 ---
 

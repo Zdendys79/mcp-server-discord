@@ -36,6 +36,7 @@ import {
 } from "./voice.js";
 import {
   isCommand,
+  cleanCommand,
   handleAnketa,
   handlePrepis,
   handleNahravej,
@@ -206,7 +207,7 @@ client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
 
     // === /stop - EMERGENCY COMMAND (hardcoded, no LLM, MUST be first!) ===
-    if (message.content.toLowerCase().trim() === "/stop") {
+    if (cleanCommand(message.content) === "/stop") {
       const userId = message.author.id;
       const results: string[] = [];
 
@@ -269,16 +270,16 @@ client.on(Events.MessageCreate, async (message) => {
 
       // Handle slash commands (before /botka)
       if (message.guild && isCommand(message.content)) {
-        const lower = message.content.toLowerCase().trim();
-        if (lower.startsWith("/anketa")) {
+        const cmd = cleanCommand(message.content);
+        if (cmd.startsWith("/anketa")) {
           await handleAnketa(message);
-        } else if (lower.startsWith("/prepis")) {
+        } else if (cmd.startsWith("/prepis")) {
           await handlePrepis(message, client);
-        } else if (lower === "/nahravej" || lower === "/zaznam") {
+        } else if (cmd === "/nahravej" || cmd === "/zaznam") {
           await handleNahravej(message, client);
-        } else if (lower === "/botka_status") {
+        } else if (cmd === "/botka_status") {
           await handleBotkaStatus(message);
-        } else if (lower === "/botka_disable" || lower === "/zakaz") {
+        } else if (cmd === "/botka_disable" || cmd === "/zakaz") {
           await handleBotkaDisable(message);
         }
         return;

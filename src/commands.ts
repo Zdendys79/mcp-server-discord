@@ -410,20 +410,30 @@ export async function handleBotkaDisable(message: Message): Promise<void> {
   }
 }
 
+/** Strip invisible characters and extract the command word (first token after /). */
+export function cleanCommand(content: string): string {
+  // Remove zero-width spaces, non-breaking spaces, and other invisible Unicode
+  // eslint-disable-next-line no-control-regex
+  return content.replace(/[\u200B-\u200D\uFEFF\u00A0\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g, "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)[0];
+}
+
 /**
  * Check if a message is a known command and handle it.
  * Returns true if handled (caller should not process further).
  * NOTE: /stop is NOT here - it's hardcoded in bot.ts as emergency handler.
  */
 export function isCommand(content: string): boolean {
-  const lower = content.toLowerCase().trim();
+  const cmd = cleanCommand(content);
   return (
-    lower.startsWith("/anketa") ||
-    lower.startsWith("/prepis") ||
-    lower === "/nahravej" ||
-    lower === "/zaznam" ||
-    lower === "/botka_status" ||
-    lower === "/botka_disable" ||
-    lower === "/zakaz"
+    cmd.startsWith("/anketa") ||
+    cmd.startsWith("/prepis") ||
+    cmd === "/nahravej" ||
+    cmd === "/zaznam" ||
+    cmd === "/botka_status" ||
+    cmd === "/botka_disable" ||
+    cmd === "/zakaz"
   );
 }

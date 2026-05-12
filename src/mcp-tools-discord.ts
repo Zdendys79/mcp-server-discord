@@ -340,6 +340,90 @@ const deleteMessagesHandler = async (
   });
 };
 
+// --- Tool: discord_add_reaction ---
+
+const addReactionHandler = async (
+  args: Record<string, unknown>
+) => {
+  const rest = requireDiscordRest();
+  const channelId = args.channel_id as string;
+  const messageId = args.message_id as string;
+  const emoji = args.emoji as string;
+
+  if (!channelId || !messageId || !emoji) {
+    return errorResponse("channel_id, message_id, and emoji are required.");
+  }
+
+  const encodedEmoji = encodeURIComponent(emoji);
+  await rest.put(
+    `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me` as `/${string}`
+  );
+
+  return jsonResponse({ success: true, emoji, message_id: messageId });
+};
+
+// --- Tool: discord_send_poll ---
+
+const POLL_LETTERS = ["🇦", "🇧", "🇨", "🇩", "🇪", "🇫", "🇬", "🇭", "🇮", "🇯"];
+
+const sendPollHandler = async (
+  args: Record<string, unknown>
+) => {
+  const rest = requireDiscordRest();
+  const channelId = args.channel_id as string;
+  const content = args.content as string;
+  const options = args.options as string[];
+
+  if (!channelId || !content) {
+    return errorResponse("channel_id and content are required.");
+  }
+  if (!options || options.length < 2) {
+    return errorResponse("At least 2 options are required.");
+  }
+  if (options.length > POLL_LETTERS.length) {
+    return errorResponse(`Maximum ${POLL_LETTERS.length} options allowed.`);
+  }
+
+  // Build message: content + options list
+  const optionLines = options
+    .map((opt, i) => `${POLL_LETTERS[i]}  ${opt}`)
+    .join("\n");
+  const fullMessage = `${content}\n\n${optionLines}`;
+
+  if (fullMessage.length > 2000) {
+    return errorResponse("Total message length exceeds 2000 characters.");
+  }
+
+  const result = await rest.post(Routes.channelMessages(channelId), {
+    body: { content: fullMessage },
+  }) as { id: string };
+
+  const messageId = result.id;
+
+  // Add reactions for each option
+  const errors: string[] = [];
+  for (let i = 0; i < options.length; i++) {
+    try {
+      const encodedEmoji = encodeURIComponent(POLL_LETTERS[i]);
+      await rest.put(
+        `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me` as `/${string}`
+      );
+      // Small delay to avoid rate limits
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    } catch (err) {
+      errors.push(`Failed reaction ${POLL_LETTERS[i]}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return jsonResponse({
+    success: errors.length === 0,
+    message_id: messageId,
+    reactions_added: options.length - errors.length,
+    options: options.map((opt, i) => ({ emoji: POLL_LETTERS[i], text: opt })),
+    errors: errors.length > 0 ? errors : undefined,
+  });
+};
+
 // --- Tool: discord_bot_status ---
 
 const botStatusHandler = async () => {
@@ -566,5 +650,49 @@ export const discordTools: ToolEntry[] = [
       inputSchema: { type: "object" as const, properties: {} },
     },
     handler: botStatusHandler,
+  },
+  {
+    definition: {
+      name: "discord_add_reaction",
+      description:
+        "Add an emoji reaction to a Discord message. Use to add vote buttons after sending a message, or react to any message the bot can see.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          channel_id: { type: "string", description: "Discord channel ID" },
+          message_id: { type: "string", description: "Discord message ID to react to" },
+          emoji: {
+            type: "string",
+            description: "Emoji to add as reaction (e.g. '👍', '🇦', '✅'). For custom server emojis use 'name:id' format.",
+          },
+        },
+        required: ["channel_id", "message_id", "emoji"],
+      },
+    },
+    handler: addReactionHandler,
+  },
+  {
+    definition: {
+      name: "discord_send_poll",
+      description:
+        "Send a poll message to a channel and automatically add regional letter reactions (🇦 🇧 🇨...) so users can vote by clicking. Max 10 options.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          channel_id: { type: "string", description: "Discord channel ID" },
+          content: {
+            type: "string",
+            description: "Poll question / intro text (shown above options)",
+          },
+          options: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of answer options (2-10). Each gets a letter reaction.",
+          },
+        },
+        required: ["channel_id", "content", "options"],
+      },
+    },
+    handler: sendPollHandler,
   },
 ];
